@@ -79,6 +79,21 @@ func (c *Client) Start() {
 	}
 }
 
+type exchangeRusult struct {
+	res *dns.Msg
+	err error
+}
+
+func exchangeToChan(ctx context.Context, message *dns.Msg, transport Transport) *chan exchangeRusult {
+	result := make(chan exchangeRusult, 1)
+	go func() {
+		var res exchangeRusult
+		res.res, res.err = transport.Exchange(ctx, message)
+		result <- res
+	}()
+	return &result
+}
+
 func (c *Client) Exchange(ctx context.Context, transport Transport, message *dns.Msg, strategy DomainStrategy) (*dns.Msg, error) {
 	return c.ExchangeWithResponseCheck(ctx, transport, message, strategy, nil)
 }
@@ -100,6 +115,7 @@ func (c *Client) ExchangeWithResponseCheck(ctx context.Context, transport Transp
 	}
 	question := message.Question[0]
 	clientSubnet, clientSubnetLoaded := ClientSubnetFromContext(ctx)
+	var rawMsg *dns.Msg
 	if clientSubnetLoaded {
 		SetClientSubnet(message, clientSubnet, true)
 	}
@@ -148,7 +164,28 @@ func (c *Client) ExchangeWithResponseCheck(ctx context.Context, transport Transp
 			return nil, ErrResponseRejectedCached
 		}
 	}
-	response, err := transport.Exchange(ctx, message)
+	var (
+		response *dns.Msg
+		err      error
+	)
+	if !clientSubnetLoaded {
+		response, err = transport.Exchange(ctx, message)
+	} else {
+		realTransport := transport
+		if sTransport, ok := transport.(*edns0SubnetTransportWrapper); ok {
+			realTransport = sTransport.Transport
+		}
+		withClientSubnet := exchangeToChan(ctx, message, realTransport)
+		withoutClientSubnet := exchangeToChan(ctx, rawMsg, realTransport)
+		if res := <-*withClientSubnet; res.err != nil && res.res.Rcode != dns.RcodeRefused {
+			response = res.res
+			err = res.err
+		} else {
+			res := <-*withoutClientSubnet
+			response = res.res
+			err = res.err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
