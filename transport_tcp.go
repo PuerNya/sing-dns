@@ -15,19 +15,19 @@ import (
 	"github.com/miekg/dns"
 )
 
-var _ Transport = (*TCPTransport)(nil)
+var _ Upstream = (*TCPUpstream)(nil)
 
 func init() {
-	RegisterTransport([]string{"tcp"}, func(options TransportOptions) (Transport, error) {
-		return NewTCPTransport(options)
+	RegisterUpstream([]string{"tcp"}, func(options UpstreamOptions) (Upstream, error) {
+		return NewTCPUpstream(options)
 	})
 }
 
-type TCPTransport struct {
-	myTransportAdapter
+type TCPUpstream struct {
+	myUpstreamAdapter
 }
 
-func NewTCPTransport(options TransportOptions) (*TCPTransport, error) {
+func NewTCPUpstream(options UpstreamOptions) (*TCPUpstream, error) {
 	serverURL, err := url.Parse(options.Address)
 	if err != nil {
 		return nil, err
@@ -39,22 +39,22 @@ func NewTCPTransport(options TransportOptions) (*TCPTransport, error) {
 	if serverAddr.Port == 0 {
 		serverAddr.Port = 53
 	}
-	return newTCPTransport(options, serverAddr), nil
+	return newTCPUpstream(options, serverAddr), nil
 }
 
-func newTCPTransport(options TransportOptions, serverAddr M.Socksaddr) *TCPTransport {
-	transport := &TCPTransport{
-		newAdapter(options, serverAddr),
+func newTCPUpstream(options UpstreamOptions, serverAddr M.Socksaddr) *TCPUpstream {
+	upstream := &TCPUpstream{
+		newUpstreamAdapter(options, serverAddr),
 	}
-	transport.handler = transport
-	return transport
+	upstream.handler = upstream
+	return upstream
 }
 
-func (t *TCPTransport) DialContext(ctx context.Context) (net.Conn, error) {
+func (t *TCPUpstream) DialContext(ctx context.Context) (net.Conn, error) {
 	return t.dialer.DialContext(ctx, N.NetworkTCP, t.serverAddr)
 }
 
-func (t *TCPTransport) ReadMessage(conn net.Conn) (*dns.Msg, error) {
+func (t *TCPUpstream) ReadMessage(conn net.Conn) (*dns.Msg, error) {
 	var length uint16
 	err := binary.Read(conn, binary.BigEndian, &length)
 	if err != nil {
@@ -74,7 +74,7 @@ func (t *TCPTransport) ReadMessage(conn net.Conn) (*dns.Msg, error) {
 	return &message, err
 }
 
-func (t *TCPTransport) WriteMessage(conn net.Conn, message *dns.Msg) error {
+func (t *TCPUpstream) WriteMessage(conn net.Conn, message *dns.Msg) error {
 	requestLen := message.Len()
 	buffer := buf.NewSize(3 + requestLen)
 	defer buffer.Release()

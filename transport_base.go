@@ -16,45 +16,37 @@ import (
 	"github.com/miekg/dns"
 )
 
-type myTransportHandler interface {
+type myUpstreamHandler interface {
 	DialContext(ctx context.Context) (net.Conn, error)
 	ReadMessage(conn net.Conn) (*dns.Msg, error)
 	WriteMessage(conn net.Conn, message *dns.Msg) error
 }
 
-type myTransportAdapter struct {
-	name       string
+type myUpstreamAdapter struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	dialer     N.Dialer
 	serverAddr M.Socksaddr
-	clientAddr netip.Prefix
-	handler    myTransportHandler
+	handler    myUpstreamHandler
 	access     sync.Mutex
 	conn       *dnsConnection
 }
 
-func newAdapter(options TransportOptions, serverAddr M.Socksaddr) myTransportAdapter {
+func newUpstreamAdapter(options UpstreamOptions, serverAddr M.Socksaddr) myUpstreamAdapter {
 	ctx, cancel := context.WithCancel(options.Context)
-	return myTransportAdapter{
-		name:       options.Name,
+	return myUpstreamAdapter{
 		ctx:        ctx,
 		cancel:     cancel,
 		dialer:     options.Dialer,
 		serverAddr: serverAddr,
-		clientAddr: options.ClientSubnet,
 	}
 }
 
-func (t *myTransportAdapter) Name() string {
-	return t.name
-}
-
-func (t *myTransportAdapter) Start() error {
+func (t *myUpstreamAdapter) Start() error {
 	return nil
 }
 
-func (t *myTransportAdapter) open(ctx context.Context) (*dnsConnection, error) {
+func (t *myUpstreamAdapter) open(ctx context.Context) (*dnsConnection, error) {
 	connection := t.conn
 	if connection != nil {
 		if !common.Done(connection.ctx) {
@@ -85,7 +77,7 @@ func (t *myTransportAdapter) open(ctx context.Context) (*dnsConnection, error) {
 	return connection, nil
 }
 
-func (t *myTransportAdapter) recvLoop(conn *dnsConnection) {
+func (t *myUpstreamAdapter) recvLoop(conn *dnsConnection) {
 	var group task.Group
 	group.Append0(func(ctx context.Context) error {
 		for {
@@ -116,7 +108,7 @@ func (t *myTransportAdapter) recvLoop(conn *dnsConnection) {
 	group.Run(conn.ctx)
 }
 
-func (t *myTransportAdapter) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
+func (t *myUpstreamAdapter) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
 	messageId := message.Id
 	var (
 		conn *dnsConnection
@@ -139,7 +131,7 @@ func (t *myTransportAdapter) Exchange(ctx context.Context, message *dns.Msg) (*d
 	return response, nil
 }
 
-func (t *myTransportAdapter) exchange(ctx context.Context, conn *dnsConnection, message *dns.Msg) (*dns.Msg, error) {
+func (t *myUpstreamAdapter) exchange(ctx context.Context, conn *dnsConnection, message *dns.Msg) (*dns.Msg, error) {
 	messageId := message.Id
 	callback := &dnsCallback{
 		done: make(chan struct{}),
@@ -170,7 +162,7 @@ func (t *myTransportAdapter) exchange(ctx context.Context, conn *dnsConnection, 
 	}
 }
 
-func (t *myTransportAdapter) cleanup(conn *dnsConnection, messageId uint16, callback *dnsCallback) {
+func (t *myUpstreamAdapter) cleanup(conn *dnsConnection, messageId uint16, callback *dnsCallback) {
 	conn.access.Lock()
 	delete(conn.callbacks, messageId)
 	conn.access.Unlock()
@@ -183,7 +175,7 @@ func (t *myTransportAdapter) cleanup(conn *dnsConnection, messageId uint16, call
 	callback.access.Unlock()
 }
 
-func (t *myTransportAdapter) Reset() {
+func (t *myUpstreamAdapter) Reset() {
 	conn := t.conn
 	if conn != nil {
 		conn.cancel()
@@ -191,16 +183,12 @@ func (t *myTransportAdapter) Reset() {
 	}
 }
 
-func (t *myTransportAdapter) Close() error {
+func (t *myUpstreamAdapter) Close() error {
 	t.Reset()
 	return nil
 }
 
-func (t *myTransportAdapter) Raw() bool {
-	return true
-}
-
-func (t *myTransportAdapter) Lookup(ctx context.Context, domain string, strategy DomainStrategy) ([]netip.Addr, error) {
+func (t *myUpstreamAdapter) Lookup(ctx context.Context, domain string, strategy DomainStrategy) ([]netip.Addr, error) {
 	return nil, os.ErrInvalid
 }
 

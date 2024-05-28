@@ -14,22 +14,22 @@ import (
 	"github.com/miekg/dns"
 )
 
-var _ Transport = (*UDPTransport)(nil)
+var _ Upstream = (*UDPUpstream)(nil)
 
 func init() {
-	RegisterTransport([]string{"udp", ""}, func(options TransportOptions) (Transport, error) {
-		return NewUDPTransport(options)
+	RegisterUpstream([]string{"udp", ""}, func(options UpstreamOptions) (Upstream, error) {
+		return NewUDPUpstream(options)
 	})
 }
 
-type UDPTransport struct {
-	myTransportAdapter
-	tcpTransport *TCPTransport
-	logger       logger.ContextLogger
-	udpSize      int
+type UDPUpstream struct {
+	myUpstreamAdapter
+	tcpUpstream *TCPUpstream
+	logger      logger.ContextLogger
+	udpSize     int
 }
 
-func NewUDPTransport(options TransportOptions) (*UDPTransport, error) {
+func NewUDPUpstream(options UpstreamOptions) (*UDPUpstream, error) {
 	var serverAddr M.Socksaddr
 	if serverURL, err := url.Parse(options.Address); err != nil || serverURL.Scheme == "" {
 		serverAddr = M.ParseSocksaddr(options.Address)
@@ -42,33 +42,33 @@ func NewUDPTransport(options TransportOptions) (*UDPTransport, error) {
 	if serverAddr.Port == 0 {
 		serverAddr.Port = 53
 	}
-	transport := &UDPTransport{
-		newAdapter(options, serverAddr),
-		newTCPTransport(options, serverAddr),
+	upstream := &UDPUpstream{
+		newUpstreamAdapter(options, serverAddr),
+		newTCPUpstream(options, serverAddr),
 		options.Logger,
 		512,
 	}
-	transport.handler = transport
-	return transport, nil
+	upstream.handler = upstream
+	return upstream, nil
 }
 
-func (t *UDPTransport) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
-	response, err := t.myTransportAdapter.Exchange(ctx, message)
+func (t *UDPUpstream) Exchange(ctx context.Context, message *dns.Msg) (*dns.Msg, error) {
+	response, err := t.myUpstreamAdapter.Exchange(ctx, message)
 	if err != nil {
 		return nil, err
 	}
 	if response.Truncated {
 		t.logger.InfoContext(ctx, "response truncated, retrying with TCP")
-		return t.tcpTransport.Exchange(ctx, message)
+		return t.tcpUpstream.Exchange(ctx, message)
 	}
 	return response, nil
 }
 
-func (t *UDPTransport) DialContext(ctx context.Context) (net.Conn, error) {
+func (t *UDPUpstream) DialContext(ctx context.Context) (net.Conn, error) {
 	return t.dialer.DialContext(ctx, "udp", t.serverAddr)
 }
 
-func (t *UDPTransport) ReadMessage(conn net.Conn) (*dns.Msg, error) {
+func (t *UDPUpstream) ReadMessage(conn net.Conn) (*dns.Msg, error) {
 	buffer := buf.NewSize(t.udpSize)
 	defer buffer.Release()
 	_, err := buffer.ReadOnceFrom(conn)
@@ -80,7 +80,7 @@ func (t *UDPTransport) ReadMessage(conn net.Conn) (*dns.Msg, error) {
 	return &message, err
 }
 
-func (t *UDPTransport) WriteMessage(conn net.Conn, message *dns.Msg) error {
+func (t *UDPUpstream) WriteMessage(conn net.Conn, message *dns.Msg) error {
 	if edns0Opt := message.IsEdns0(); edns0Opt != nil {
 		if udpSize := int(edns0Opt.UDPSize()); udpSize > t.udpSize {
 			t.udpSize = udpSize
